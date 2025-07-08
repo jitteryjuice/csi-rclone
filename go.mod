@@ -42,7 +42,7 @@ require (
 	k8s.io/apiextensions-apiserver v0.0.0-20190111034747-7d26de67f177 // indirect
 	k8s.io/apimachinery v0.0.0-20181127025237-2b1284ed4c93
 	k8s.io/apiserver v0.0.0-20190111033246-d50e9ac5404f // indirect
-	k8s.io/client-go v10.0.0+incompatible
+	k8s.io/client-go v11.0.0+incompatible
 	k8s.io/cloud-provider v0.0.0-20190223141949-e954a34baf43 // indirect
 	k8s.io/csi-api v0.0.0-20190223140843-b4e64dae0b19 // indirect
 	k8s.io/klog v0.2.0 // indirect

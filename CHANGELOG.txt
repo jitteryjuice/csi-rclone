@@ -1,5 +1,11 @@
 # CHANGELOG
 
+3.1.0:
+  - Rebase container to alpine 3.22
+  - rclone version v1.70.1
+  - Update csi-provisioner to latest (5.3.0)
+  - Update csi-attacher to latest (4.9.0)
+
 3.0.0:
   - Dropping support for kubernetes versions < 1.20 due to [external provisioner](https://github.com/kubernetes-csi/external-provisioner?tab=readme-ov-file#compatibility)+ compatibility requirement.
   - PersistentVolume provisioner support. Creation of PersistentVolume and using it in PersistentVolumeClaim via selector is still supported,

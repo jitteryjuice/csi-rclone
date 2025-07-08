@@ -5,8 +5,7 @@ This project implements Container Storage Interface (CSI) plugin that allows usi
 
 ## Kubernetes cluster compatability
 Works (tested):
-- `deploy/kubernetes/1.20`: K8S>= 1.20.x External provisioner requires kubernetes [1.20](https://github.com/kubernetes-csi/external-provisioner?tab=readme-ov-file#compatibility)+.
-- Older driver versions (before v3.0.0) support kubernetes 1.13-1.19, but are not maintained.
+- `deploy/kubernetes/1.33`: K8S>= 1.30.x External provisioner requires kubernetes [1.20](https://github.com/kubernetes-csi/external-provisioner?tab=readme-ov-file#compatibility)+.
 
 ## Installing CSI driver to kubernetes cluster
 TLDR: `kubectl apply -f deploy/kubernetes/1.20`

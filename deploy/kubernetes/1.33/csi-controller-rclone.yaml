@@ -20,11 +20,10 @@ spec:
       serviceAccountName: csi-controller-rclone
       containers:
         - name: csi-provisioner
-          image: registry.k8s.io/sig-storage/csi-provisioner:v5.0.2
+          image: registry.k8s.io/sig-storage/csi-provisioner:v5.3.0
           args:
             - "--csi-address=$(ADDRESS)"
             - "--extra-create-metadata"
-            # - "--leader-election"
             - "--v=1"
           env:
             - name: ADDRESS
@@ -34,11 +33,10 @@ spec:
             - name: socket-dir
               mountPath: /plugin
         - name: csi-attacher
-          image: k8s.gcr.io/sig-storage/csi-attacher:v3.4.0
+          image: k8s.gcr.io/sig-storage/csi-attacher:v4.9.0
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v=1"
-            # - "--leader-election"
           env:
             - name: ADDRESS
               value: /plugin/csi.sock
@@ -47,7 +45,7 @@ spec:
             - name: socket-dir
               mountPath: /plugin
         - name: rclone
-          image: wunderio/csi-rclone:v3.0.0
+          image: etern1ty/csi-rclone:v3.1.0
           args :
             - "/bin/csi-rclone-plugin"
             - "--nodeid=$(NODE_ID)"

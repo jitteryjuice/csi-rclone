@@ -107,10 +107,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		mountOptions = append(mountOptions, "ro")
 	}
 
-	// Load default connection settings from secret
-	secret, _ := getSecret("rclone-secret")
-
-	remote, remotePath, configData, flags, e := extractFlags(req.GetVolumeContext(), secret)
+	remote, remotePath, configData, flags, e := extractFlags(req.GetVolumeContext())
 	if e != nil {
 		glog.Warningf("storage parameter error: %s", e)
 		return nil, e
@@ -135,20 +132,35 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-func extractFlags(volumeContext map[string]string, secret *v1.Secret) (string, string, string, map[string]string, error) {
+func extractFlags(volumeContext map[string]string) (string, string, string, map[string]string, error) {
 
 	// Empty argument list
 	flags := make(map[string]string)
 
+	// Load default connection settings from secret
+	var secret *v1.Secret
+
+	if secretName, ok := volumeContext["secretName"]; ok {
+		// Load the secret that the PV spec defines
+		var e error
+		secret, e = getSecret(secretName)
+		if e != nil {
+			// if the user explicitly requested a secret and there is an error fetching it, bail with an error
+			return "", "", "", nil, e
+		}
+	} else {
+		// use rclone-secret as the default secret if none was defined
+		secret, _ = getSecret("rclone-secret")
+	}
+
 	// Secret values are default, gets merged and overriden by corresponding PV values
 	if secret != nil && secret.Data != nil && len(secret.Data) > 0 {
-
 		// Needs byte to string casting for map values
 		for k, v := range secret.Data {
 			flags[k] = string(v)
 		}
 	} else {
-		glog.V(4).Infof("No csi-rclone connection defaults secret found.")
+		glog.Infof("No csi-rclone connection defaults secret found.")
 	}
 
 	if len(volumeContext) > 0 {
@@ -178,6 +190,7 @@ func extractFlags(volumeContext map[string]string, secret *v1.Secret) (string, s
 
 	delete(flags, "remote")
 	delete(flags, "remotePath")
+	delete(flags, "secretName")
 
 	return remote, remotePath, configData, flags, nil
 }
@@ -245,7 +258,6 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		// Connect to rclone rpc server and query the operation status
 		// If the rclone process is still running, wait for it to finish cache sync
 		// If the rclone process is not running, proceed to volume unmount
-
 		// check the state of the rclone process until it finishes the cache sync
 		// Hard timeout is 1 hour
 		copyTimeout := time.Now().Add(1 * time.Hour)
@@ -345,7 +357,7 @@ func getSecret(secretName string) (*v1.Secret, error) {
 
 	namespace, _, err := kubeconfig.Namespace()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "can't get current namespace, error %s", secretName, err)
+		return nil, status.Errorf(codes.Internal, "can't get current namespace for secret %s, error %s", secretName, err)
 	}
 
 	glog.V(4).Infof("Loading csi-rclone connection defaults from secret %s/%s", namespace, secretName)
@@ -382,10 +394,54 @@ func getFreePort() (port int, err error) {
 	return 0, err
 }
 
+// Function to get rclone rc details
+// If the user provides the rc-addr flag, it will use that address
+// If the user does not provide the rc-addr flag, it will find a free port
+// and use localhost as the host
+func getRcDetails(flags map[string]string) (host string, port int, err error) {
+
+	rcHost := "localhost"
+	var rcPort int
+	// Find a free port for rclone rc
+	rcPort, err = getFreePort()
+	if err != nil {
+		return "", 0, err
+	}
+	// Check if the user has provided the rc address
+	if rcAddr, ok := flags["rc-addr"]; ok {
+		// Parse the rcAddr
+		glog.V(4).Infof("processing user provide rc-addr: %s", rcAddr)
+		host, portStr, err := net.SplitHostPort(rcAddr)
+		if err != nil {
+			return "", 0, fmt.Errorf("invalid rc-addr format: %s, error: %v", rcAddr, err)
+		}
+		if host == "" {
+			host = "0.0.0.0" // Default to all interfaces if no host is provided
+		}
+		rcHost = host
+		if portStr != "" {
+			rcPort, err = strconv.Atoi(portStr)
+			if err != nil {
+				return "", 0, fmt.Errorf("invalid rc-addr port: %s, error: %v", portStr, err)
+			}
+		}
+	}
+	glog.V(4).Infof("using rclone rc with %s:%d", rcHost, rcPort)
+	return rcHost, rcPort, nil
+}
+
 // Mount routine.
 func Mount(remote string, remotePath string, targetPath string, configData string, flags map[string]string) (rcPort int, err error) {
 	mountCmd := "rclone"
 	mountArgs := []string{}
+
+	// Retrieve rclone rc details
+	// If rc-addr is not set, use a free port
+	// If rc-addr is set, use the provided host and port
+	rcHost, rcPort, err := getRcDetails(flags)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rclone rc details: %v", err)
+	}
 
 	defaultFlags := map[string]string{}
 	defaultFlags["cache-info-age"] = "72h"
@@ -395,6 +451,8 @@ func Mount(remote string, remotePath string, targetPath string, configData strin
 	defaultFlags["cache-dir"] = "/tmp/rclone-vfs-cache/" + targetPath
 	defaultFlags["allow-non-empty"] = "true"
 	defaultFlags["allow-other"] = "true"
+	defaultFlags["rc"] = ""
+	defaultFlags["rc-addr"] = fmt.Sprintf("%s:%d", rcHost, rcPort)
 
 	remoteWithPath := fmt.Sprintf(":%s:%s", remote, remotePath)
 
@@ -403,20 +461,12 @@ func Mount(remote string, remotePath string, targetPath string, configData strin
 		glog.V(4).Infof("remote %s found in configData, remoteWithPath set to %s", remote, remoteWithPath)
 	}
 
-	// Find a free port for rclone rc
-	rcPort, err = getFreePort()
-	if err != nil {
-		return 0, err
-	}
-
 	// rclone mount remote:path /path/to/mountpoint [flags]
 	mountArgs = append(
 		mountArgs,
 		"mount",
 		remoteWithPath,
 		targetPath,
-		"--rc",
-		"--rc-addr="+fmt.Sprintf("localhost:%d", rcPort),
 		"--daemon",
 		"--daemon-wait=0",
 	)
@@ -425,8 +475,7 @@ func Mount(remote string, remotePath string, targetPath string, configData strin
 	// create a temporary file, fill it with  configData content,
 	// and run rclone with --config <tmpfile> flag
 	if configData != "" {
-
-		configFile, err := ioutil.TempFile("", "rclone.conf")
+		configFile, err := os.CreateTemp("", "rclone.conf")
 		if err != nil {
 			return 0, err
 		}
@@ -435,7 +484,6 @@ func Mount(remote string, remotePath string, targetPath string, configData strin
 		// However, due to a rclone mount --daemon flag, rclone forks and creates a race condition
 		// with this nodeplugin proceess. As a result, the config file gets deleted
 		// before it's reread by a forked process.
-
 		if _, err := configFile.Write([]byte(configData)); err != nil {
 			return 0, err
 		}
@@ -449,19 +497,27 @@ func Mount(remote string, remotePath string, targetPath string, configData strin
 		mountArgs = append(mountArgs, "--config=''")
 	}
 
-	env := os.Environ()
-
 	// Add default flags
 	for k, v := range defaultFlags {
 		// Exclude overriden flags
 		if _, ok := flags[k]; !ok {
-			env = append(env, fmt.Sprintf("%s=%s", flagToEnvName(k), v))
+			// env = append(env, fmt.Sprintf("%s=%s", flagToEnvName(k), v))
+			if v == "" {
+				mountArgs = append(mountArgs, fmt.Sprintf("--%s", k))
+			} else {
+				mountArgs = append(mountArgs, fmt.Sprintf("--%s=%s", k, v))
+			}
 		}
 	}
 
 	// Add user supplied flags
 	for k, v := range flags {
-		env = append(env, fmt.Sprintf("%s=%s", flagToEnvName(k), v))
+		// env = append(env, fmt.Sprintf("%s=%s", flagToEnvName(k), v))
+		if v == "" {
+			mountArgs = append(mountArgs, fmt.Sprintf("--%s", k))
+		} else {
+			mountArgs = append(mountArgs, fmt.Sprintf("--%s=%s", k, v))
+		}
 	}
 
 	// create target, os.Mkdirall is noop if it exists
@@ -474,7 +530,6 @@ func Mount(remote string, remotePath string, targetPath string, configData strin
 	glog.V(4).Infof("mountArgs: %v", mountArgs)
 
 	cmd := exec.Command(mountCmd, mountArgs...)
-	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("mounting failed: %v cmd: '%s' remote: '%s' targetpath: %s output: %q",

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+3.1.1:
+  - Provide extra flags to the command for visibility
+  - Allow user override of rc-addr, defaulting to localhost:<free port>
+
 3.1.0:
   - Rebase container to alpine 3.22
   - rclone version v1.70.1

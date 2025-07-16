@@ -47,7 +47,7 @@ require (
 	k8s.io/csi-api v0.0.0-20190223140843-b4e64dae0b19 // indirect
 	k8s.io/klog v0.2.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20190222203931-aa8624f5a2df // indirect
-	k8s.io/kubernetes v1.13.2
+	k8s.io/kubernetes v1.33.3
 	k8s.io/utils v0.0.0-20190221042446-c2654d5206da // indirect
 	sigs.k8s.io/yaml v1.1.0 // indirect
 )
